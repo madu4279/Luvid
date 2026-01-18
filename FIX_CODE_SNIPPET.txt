@@ -1,0 +1,25 @@
+// PASTE THIS CODE INTO f:\Luvid_02\app\page.tsx
+// Replace the entire "if (selectedLUT) { ... }" block (around line 242-309)
+// with this professional implementation:
+
+// Apply LUT to after canvas if selected
+if (selectedLUT) {
+    const imageData = afterCtx.getImageData(0, 0, afterCanvas.width, afterCanvas.height)
+    
+    const lut = allLUTs.find(l => l.id === selectedLUT)
+    const lutData = lut?.parsedData || parsedLUTData
+
+    // Use professional LUT processor with trilinear interpolation
+    processImageWithLUT(
+        imageData,
+        lutData,
+        lutIntensity,
+        {
+            exposure,
+            contrast,
+            saturation
+        }
+    )
+
+    afterCtx.putImageData(imageData, 0, 0)
+}

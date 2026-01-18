@@ -1,0 +1,620 @@
+'use client'
+
+import { useState, useRef, useEffect } from 'react'
+import {
+    Film,
+    Upload,
+    Lock,
+    Download,
+    Sun,
+    Contrast,
+    Droplets,
+    Thermometer,
+    Play,
+    Layers
+} from 'lucide-react'
+
+// Log Profile Types
+const LOG_PROFILES = [
+    { id: 'arri', name: 'ARRI LogC', icon: '🎬', image: '/samples/arri-log.jpg' },
+    { id: 'sony', name: 'Sony S-Log3', icon: '📹', image: '/samples/sony-log.jpg' },
+    { id: 'canon', name: 'Canon C-Log', icon: '🎥', image: '/samples/canon-log.jpg' },
+    { id: 'panasonic', name: 'Panasonic V-Log', icon: '🎞️', image: '/samples/panasonic-log.jpg' },
+]
+
+// Sample LUTs with color profiles
+const SAMPLE_LUTS = [
+    {
+        id: 1,
+        name: 'Cinematic Teal',
+        file: 'cinematic-teal.cube',
+        colors: { h: 180, s: 60, l: 45 }, // Teal/Cyan
+        thumbnail: 'linear-gradient(135deg, hsl(180, 70%, 50%), hsl(200, 60%, 40%))'
+    },
+    {
+        id: 2,
+        name: 'Warm Sunset',
+        file: 'warm-sunset.cube',
+        colors: { h: 25, s: 70, l: 55 }, // Orange/Warm
+        thumbnail: 'linear-gradient(135deg, hsl(25, 80%, 60%), hsl(15, 70%, 50%))'
+    },
+    {
+        id: 3,
+        name: 'Cold Steel',
+        file: 'cold-steel.cube',
+        colors: { h: 200, s: 30, l: 40 }, // Blue/Steel
+        thumbnail: 'linear-gradient(135deg, hsl(200, 40%, 50%), hsl(220, 30%, 35%))'
+    },
+    {
+        id: 4,
+        name: 'Film Noir',
+        file: 'film-noir.cube',
+        colors: { h: 0, s: 0, l: 30 }, // Black & White
+        thumbnail: 'linear-gradient(135deg, hsl(0, 0%, 40%), hsl(0, 0%, 20%))'
+    },
+    {
+        id: 5,
+        name: 'Vintage 70s',
+        file: 'vintage-70s.cube',
+        colors: { h: 40, s: 50, l: 50 }, // Warm vintage
+        thumbnail: 'linear-gradient(135deg, hsl(40, 60%, 55%), hsl(30, 50%, 45%))'
+    },
+]
+
+export default function LuvidApp() {
+    const [selectedProfile, setSelectedProfile] = useState<string | null>(null)
+    const [selectedLUT, setSelectedLUT] = useState<number | null>(null)
+    const [lutIntensity, setLutIntensity] = useState(100)
+    const [exposure, setExposure] = useState(0)
+    const [contrast, setContrast] = useState(0)
+    const [saturation, setSaturation] = useState(0)
+    const [temperature, setTemperature] = useState(0)
+    const [sliderPosition, setSliderPosition] = useState(50)
+    const [isDragging, setIsDragging] = useState(false)
+    const [uploadedLUTs, setUploadedLUTs] = useState<any[]>([])
+    const [uploadedImage, setUploadedImage] = useState<string | null>(null)
+    const [parsedLUTData, setParsedLUTData] = useState<any>(null)
+    const canvasRef = useRef<HTMLDivElement>(null)
+    const beforeCanvasRef = useRef<HTMLCanvasElement>(null)
+    const afterCanvasRef = useRef<HTMLCanvasElement>(null)
+
+    // Handle split-view slider
+    const handleMouseDown = () => setIsDragging(true)
+    const handleMouseUp = () => setIsDragging(false)
+
+    const handleMouseMove = (e: React.MouseEvent) => {
+        if (!isDragging || !canvasRef.current) return
+        const rect = canvasRef.current.getBoundingClientRect()
+        const x = e.clientX - rect.left
+        const percentage = (x / rect.width) * 100
+        setSliderPosition(Math.max(0, Math.min(100, percentage)))
+    }
+
+    useEffect(() => {
+        if (isDragging) {
+            document.addEventListener('mouseup', handleMouseUp as any)
+            return () => document.removeEventListener('mouseup', handleMouseUp as any)
+        }
+    }, [isDragging])
+
+    // Handle Image Upload
+    const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0]
+        if (!file) return
+
+        const reader = new FileReader()
+        reader.onload = (event) => {
+            setUploadedImage(event.target?.result as string)
+        }
+        reader.readAsDataURL(file)
+    }
+
+    // Parse .cube LUT file
+    const parseCubeLUT = (content: string) => {
+        const lines = content.split('\n')
+        const lutData: number[][] = []
+        let size = 33
+
+        lines.forEach(line => {
+            const trimmed = line.trim()
+            if (trimmed.startsWith('LUT_3D_SIZE')) {
+                size = parseInt(trimmed.split(/\s+/)[1])
+            }
+            if (trimmed.match(/^[\d.]+\s+[\d.]+\s+[\d.]+$/)) {
+                const [r, g, b] = trimmed.split(/\s+/).map(Number)
+                lutData.push([r, g, b])
+            }
+        })
+
+        return { size, data: lutData }
+    }
+
+    // Handle LUT folder upload
+    const handleLUTUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const files = e.target.files
+        if (!files) return
+
+        Array.from(files).forEach(file => {
+            if (file.name.endsWith('.cube')) {
+                const reader = new FileReader()
+                reader.onload = (event) => {
+                    const content = event.target?.result as string
+                    const parsed = parseCubeLUT(content)
+
+                    const newLUT = {
+                        id: Date.now(),
+                        name: file.name.replace('.cube', ''),
+                        file: file.name,
+                        parsedData: parsed,
+                        thumbnail: 'linear-gradient(135deg, hsl(280, 60%, 50%), hsl(300, 50%, 40%))'
+                    }
+
+                    setUploadedLUTs(prev => [...prev, newLUT])
+
+                    // If this is the first LUT uploaded, set it as selected and parse it
+                    if (!selectedLUT) {
+                        setSelectedLUT(newLUT.id)
+                        setParsedLUTData(parsed)
+                    }
+                }
+                reader.readAsText(file)
+            }
+        })
+    }
+
+    // Handle LUT Export
+    const handleExportLUT = () => {
+        if (!selectedLUT) return
+
+        const lut = allLUTs.find(l => l.id === selectedLUT)
+        if (!lut) return
+
+        // Generate a simple .cube file
+        const lutName = `${lut.name}_Custom_${Date.now()}`
+        let cubeContent = `TITLE "${lutName}"\n`
+        cubeContent += `LUT_3D_SIZE 17\n\n`
+
+        // Generate simple LUT data (17x17x17 cube)
+        for (let b = 0; b < 17; b++) {
+            for (let g = 0; g < 17; g++) {
+                for (let r = 0; r < 17; r++) {
+                    let rVal = r / 16
+                    let gVal = g / 16
+                    let bVal = b / 16
+
+                    // Apply adjustments
+                    const exposureFactor = Math.pow(2, exposure / 50)
+                    rVal *= exposureFactor
+                    gVal *= exposureFactor
+                    bVal *= exposureFactor
+
+                    // Apply saturation
+                    const gray = 0.2989 * rVal + 0.5870 * gVal + 0.1140 * bVal
+                    const satFactor = 1 + (saturation / 50)
+                    rVal = gray + (rVal - gray) * satFactor
+                    gVal = gray + (gVal - gray) * satFactor
+                    bVal = gray + (bVal - gray) * satFactor
+
+                    // Clamp values
+                    rVal = Math.max(0, Math.min(1, rVal))
+                    gVal = Math.max(0, Math.min(1, gVal))
+                    bVal = Math.max(0, Math.min(1, bVal))
+
+                    cubeContent += `${rVal.toFixed(6)} ${gVal.toFixed(6)} ${bVal.toFixed(6)}\n`
+                }
+            }
+        }
+
+        // Download the file
+        const blob = new Blob([cubeContent], { type: 'text/plain' })
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = `${lutName}.cube`
+        document.body.appendChild(a)
+        a.click()
+        document.body.removeChild(a)
+        URL.revokeObjectURL(url)
+    }
+
+    // Apply LUT to image using canvas
+    useEffect(() => {
+        if (!uploadedImage || !beforeCanvasRef.current || !afterCanvasRef.current) return
+
+        const img = new Image()
+        img.onload = () => {
+            const beforeCanvas = beforeCanvasRef.current!
+            const afterCanvas = afterCanvasRef.current!
+            const beforeCtx = beforeCanvas.getContext('2d')!
+            const afterCtx = afterCanvas.getContext('2d')!
+
+            // Set canvas size to match image
+            beforeCanvas.width = img.width
+            beforeCanvas.height = img.height
+            afterCanvas.width = img.width
+            afterCanvas.height = img.height
+
+            // Draw original image on both canvases
+            beforeCtx.drawImage(img, 0, 0)
+            afterCtx.drawImage(img, 0, 0)
+
+            // Apply LUT to after canvas if selected
+            if (selectedLUT) {
+                const imageData = afterCtx.getImageData(0, 0, afterCanvas.width, afterCanvas.height)
+                const data = imageData.data
+
+                const lut = allLUTs.find(l => l.id === selectedLUT)
+                const lutData = lut?.parsedData || parsedLUTData
+
+                for (let i = 0; i < data.length; i += 4) {
+                    let r = data[i] / 255
+                    let g = data[i + 1] / 255
+                    let b = data[i + 2] / 255
+
+                    // Apply LUT if available
+                    if (lutData && lutData.data && lutData.data.length > 0) {
+                        const size = lutData.size
+                        const rIndex = Math.floor(r * (size - 1))
+                        const gIndex = Math.floor(g * (size - 1))
+                        const bIndex = Math.floor(b * (size - 1))
+                        const index = rIndex + gIndex * size + bIndex * size * size
+
+                        if (index < lutData.data.length) {
+                            const [lutR, lutG, lutB] = lutData.data[index]
+                            // Blend with intensity
+                            r = r + (lutR - r) * (lutIntensity / 100)
+                            g = g + (lutG - g) * (lutIntensity / 100)
+                            b = b + (lutB - b) * (lutIntensity / 100)
+                        }
+                    } else if (lut?.colors) {
+                        // Fallback to color simulation
+                        const baseH = lut.colors.h + (temperature * 0.5)
+                        const baseS = Math.max(0, Math.min(100, lut.colors.s + saturation))
+                        const baseL = Math.max(10, Math.min(90, lut.colors.l + (exposure * 0.4)))
+
+                        // Simple color shift (not a real LUT, just for demo)
+                        const factor = lutIntensity / 100
+                        r = r + ((baseH / 360) - r) * factor * 0.1
+                        g = g + ((baseS / 100) - g) * factor * 0.1
+                        b = b + ((baseL / 100) - b) * factor * 0.1
+                    }
+
+                    // Apply exposure
+                    const expFactor = Math.pow(2, exposure / 50)
+                    r *= expFactor
+                    g *= expFactor
+                    b *= expFactor
+
+                    // Apply saturation
+                    const gray = 0.2989 * r + 0.5870 * g + 0.1140 * b
+                    const satFactor = 1 + (saturation / 50)
+                    r = gray + (r - gray) * satFactor
+                    g = gray + (g - gray) * satFactor
+                    b = gray + (b - gray) * satFactor
+
+                    // Apply contrast
+                    const contrastFactor = (100 + contrast) / 100
+                    r = ((r - 0.5) * contrastFactor) + 0.5
+                    g = ((g - 0.5) * contrastFactor) + 0.5
+                    b = ((b - 0.5) * contrastFactor) + 0.5
+
+                    // Clamp and write back
+                    data[i] = Math.max(0, Math.min(255, r * 255))
+                    data[i + 1] = Math.max(0, Math.min(255, g * 255))
+                    data[i + 2] = Math.max(0, Math.min(255, b * 255))
+                }
+
+                afterCtx.putImageData(imageData, 0, 0)
+            }
+        }
+        img.src = uploadedImage
+    }, [uploadedImage, selectedLUT, lutIntensity, exposure, contrast, saturation, temperature, parsedLUTData])
+
+    const allLUTs = [...SAMPLE_LUTS, ...uploadedLUTs]
+
+    return (
+        <div className="h-screen w-screen overflow-hidden flex flex-col">
+            {/* Header */}
+            <header className="glass-panel-strong border-b border-white/10 px-6 py-4 flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 bg-gradient-to-br from-neon-cyan to-blue-500 rounded-lg flex items-center justify-center">
+                        <Film className="w-6 h-6 text-black" />
+                    </div>
+                    <div>
+                        <h1 className="text-2xl font-bold tracking-tight">LUVID</h1>
+                        <p className="text-xs text-white/40 technical-text">Visualize. Customize. Export.</p>
+                    </div>
+                </div>
+
+                <div className="flex items-center gap-4">
+                    <button className="glass-panel px-4 py-2 hover:bg-white/5 transition-smooth flex items-center gap-2">
+                        <Play className="w-4 h-4 text-neon-gold" />
+                        <Lock className="w-3 h-3 text-neon-gold" />
+                        <span className="text-sm text-neon-gold technical-text">Video Mode</span>
+                    </button>
+                </div>
+            </header>
+
+            {/* Main Content */}
+            <div className="flex-1 flex overflow-hidden">
+                {/* Left Sidebar - The Vault */}
+                <aside className="w-20 glass-panel-strong border-r border-white/10 flex flex-col items-center py-6 gap-4">
+                    <div className="technical-text text-white/40 mb-4 rotate-180" style={{ writingMode: 'vertical-rl' }}>
+                        LOG PROFILES
+                    </div>
+
+                    {LOG_PROFILES.map((profile) => (
+                        <button
+                            key={profile.id}
+                            onClick={() => setSelectedProfile(profile.id)}
+                            className={`w-12 h-12 rounded-lg flex items-center justify-center text-2xl transition-smooth ${selectedProfile === profile.id
+                                ? 'bg-neon-cyan/20 ring-2 ring-neon-cyan neon-glow'
+                                : 'glass-panel hover:bg-white/5'
+                                }`}
+                            title={profile.name}
+                        >
+                            {profile.icon}
+                        </button>
+                    ))}
+                </aside>
+
+                {/* Center Stage - The Canvas */}
+                <main className="flex-1 flex flex-col p-6 gap-6">
+                    <div
+                        ref={canvasRef}
+                        className="flex-1 glass-panel relative overflow-hidden cursor-col-resize"
+                        onMouseMove={handleMouseMove}
+                        onMouseLeave={handleMouseUp}
+                    >
+                        {selectedProfile ? (
+                            <>
+                                {/* Before/After Split View */}
+                                <div className="absolute inset-0 flex">
+                                    {/* Before (Raw Log) */}
+                                    <div
+                                        className="absolute inset-0 bg-gradient-to-br from-gray-800 via-gray-700 to-gray-600"
+                                        style={{ clipPath: `inset(0 ${100 - sliderPosition}% 0 0)` }}
+                                    >
+                                        <div className="w-full h-full flex items-center justify-center">
+                                            <div className="text-center">
+                                                <p className="technical-text text-white/60 mb-2">RAW LOG</p>
+                                                <p className="text-sm text-white/40">
+                                                    {LOG_PROFILES.find(p => p.id === selectedProfile)?.name}
+                                                </p>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {/* After (LUT Applied) */}
+                                    <div
+                                        className="absolute inset-0"
+                                        style={{
+                                            clipPath: `inset(0 0 0 ${sliderPosition}%)`,
+                                            background: selectedLUT
+                                                ? (() => {
+                                                    const lut = allLUTs.find(l => l.id === selectedLUT)
+                                                    if (!lut?.colors) return 'linear-gradient(to br, rgb(107, 114, 128), rgb(75, 85, 99), rgb(55, 65, 81))'
+
+                                                    const baseH = lut.colors.h + (temperature * 0.5)
+                                                    const baseS = Math.max(0, Math.min(100, lut.colors.s + saturation))
+                                                    const baseL = Math.max(10, Math.min(90, lut.colors.l + (exposure * 0.4)))
+
+                                                    return `linear-gradient(135deg, 
+                                                        hsl(${baseH}, ${baseS}%, ${baseL + 10}%),
+                                                        hsl(${baseH + 10}, ${baseS - 10}%, ${baseL}%),
+                                                        hsl(${baseH + 20}, ${baseS - 20}%, ${baseL - 10}%)
+                                                    )`
+                                                })()
+                                                : 'linear-gradient(to br, rgb(107, 114, 128), rgb(75, 85, 99), rgb(55, 65, 81))',
+                                            filter: `contrast(${100 + contrast}%) saturate(${100 + (saturation * 2)}%)`,
+                                            opacity: lutIntensity / 100
+                                        }}
+                                    >
+                                        <div className="w-full h-full flex items-center justify-center">
+                                            {selectedLUT && (
+                                                <div className="text-center">
+                                                    <p className="technical-text text-white/80 mb-2">LUT APPLIED</p>
+                                                    <p className="text-sm text-white/60">
+                                                        {allLUTs.find(l => l.id === selectedLUT)?.name}
+                                                    </p>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* Draggable Slider */}
+                                <div
+                                    className="absolute top-0 bottom-0 w-1 bg-neon-cyan neon-glow cursor-col-resize z-10"
+                                    style={{ left: `${sliderPosition}%` }}
+                                    onMouseDown={handleMouseDown}
+                                >
+                                    <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-8 h-8 bg-neon-cyan rounded-full neon-glow flex items-center justify-center">
+                                        <Layers className="w-4 h-4 text-black" />
+                                    </div>
+                                </div>
+                            </>
+                        ) : (
+                            <div className="w-full h-full flex items-center justify-center">
+                                <div className="text-center">
+                                    <Film className="w-16 h-16 text-white/20 mx-auto mb-4" />
+                                    <p className="technical-text text-white/40">SELECT A LOG PROFILE</p>
+                                    <p className="text-sm text-white/20 mt-2">Choose from the left sidebar</p>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Bottom Strip - The Look Deck */}
+                    <div className="glass-panel p-4">
+                        <div className="flex items-center gap-4 mb-3">
+                            <p className="technical-text text-white/60">LUT LIBRARY</p>
+                            <label className="glass-panel px-3 py-1.5 hover:bg-white/5 transition-smooth cursor-pointer flex items-center gap-2">
+                                <Upload className="w-4 h-4 text-neon-cyan" />
+                                <span className="text-xs technical-text text-neon-cyan">UPLOAD .CUBE</span>
+                                <input
+                                    type="file"
+                                    multiple
+                                    accept=".cube"
+                                    className="hidden"
+                                    onChange={handleLUTUpload}
+                                />
+                            </label>
+                        </div>
+
+                        <div className="flex gap-3 overflow-x-auto custom-scrollbar pb-2">
+                            {allLUTs.map((lut) => (
+                                <button
+                                    key={lut.id}
+                                    onClick={() => setSelectedLUT(lut.id)}
+                                    className={`flex-shrink-0 w-32 h-20 rounded-lg transition-smooth ${selectedLUT === lut.id
+                                        ? 'ring-2 ring-neon-cyan neon-glow'
+                                        : 'glass-panel hover:bg-white/5'
+                                        }`}
+                                    style={{
+                                        background: lut.thumbnail || `linear-gradient(135deg, 
+                      hsl(${lut.id * 30}, 70%, 50%),
+                      hsl(${lut.id * 30 + 20}, 60%, 40%)
+                    )`
+                                    }}
+                                >
+                                    <div className="w-full h-full flex items-end p-2">
+                                        <p className="text-xs font-medium text-white drop-shadow-lg truncate">
+                                            {lut.name}
+                                        </p>
+                                    </div>
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                </main>
+
+                {/* Right Panel - The Inspector */}
+                <aside className="w-80 glass-panel-strong border-l border-white/10 flex flex-col p-6 gap-6 overflow-y-auto custom-scrollbar">
+                    <div>
+                        <h2 className="technical-text text-white/80 mb-4">LUT INTENSITY</h2>
+                        <div className="space-y-2">
+                            <input
+                                type="range"
+                                min="0"
+                                max="100"
+                                value={lutIntensity}
+                                onChange={(e) => setLutIntensity(Number(e.target.value))}
+                                disabled={!selectedLUT}
+                            />
+                            <div className="flex justify-between text-xs text-white/40">
+                                <span>0%</span>
+                                <span className="text-neon-cyan">{lutIntensity}%</span>
+                                <span>100%</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="border-t border-white/5 pt-6">
+                        <h2 className="technical-text text-white/80 mb-4">GRADING TOOLS</h2>
+
+                        {/* Exposure */}
+                        <div className="mb-4">
+                            <div className="flex items-center gap-2 mb-2">
+                                <Sun className="w-4 h-4 text-white/60" />
+                                <label className="text-sm text-white/60">Exposure</label>
+                                <span className="ml-auto text-xs text-neon-cyan">{exposure > 0 ? '+' : ''}{exposure}</span>
+                            </div>
+                            <input
+                                type="range"
+                                min="-50"
+                                max="50"
+                                value={exposure}
+                                onChange={(e) => setExposure(Number(e.target.value))}
+                                disabled={!selectedLUT}
+                            />
+                        </div>
+
+                        {/* Contrast */}
+                        <div className="mb-4">
+                            <div className="flex items-center gap-2 mb-2">
+                                <Contrast className="w-4 h-4 text-white/60" />
+                                <label className="text-sm text-white/60">Contrast</label>
+                                <span className="ml-auto text-xs text-neon-cyan">{contrast > 0 ? '+' : ''}{contrast}</span>
+                            </div>
+                            <input
+                                type="range"
+                                min="-50"
+                                max="50"
+                                value={contrast}
+                                onChange={(e) => setContrast(Number(e.target.value))}
+                                disabled={!selectedLUT}
+                            />
+                        </div>
+
+                        {/* Saturation */}
+                        <div className="mb-4">
+                            <div className="flex items-center gap-2 mb-2">
+                                <Droplets className="w-4 h-4 text-white/60" />
+                                <label className="text-sm text-white/60">Saturation</label>
+                                <span className="ml-auto text-xs text-neon-cyan">{saturation > 0 ? '+' : ''}{saturation}</span>
+                            </div>
+                            <input
+                                type="range"
+                                min="-50"
+                                max="50"
+                                value={saturation}
+                                onChange={(e) => setSaturation(Number(e.target.value))}
+                                disabled={!selectedLUT}
+                            />
+                        </div>
+
+                        {/* Temperature */}
+                        <div className="mb-4">
+                            <div className="flex items-center gap-2 mb-2">
+                                <Thermometer className="w-4 h-4 text-white/60" />
+                                <label className="text-sm text-white/60">Temperature</label>
+                                <span className="ml-auto text-xs text-neon-cyan">{temperature > 0 ? '+' : ''}{temperature}</span>
+                            </div>
+                            <input
+                                type="range"
+                                min="-50"
+                                max="50"
+                                value={temperature}
+                                onChange={(e) => setTemperature(Number(e.target.value))}
+                                disabled={!selectedLUT}
+                            />
+                        </div>
+                    </div>
+
+                    <div className="border-t border-white/5 pt-6 mt-auto">
+                        {/* Export Button */}
+                        <button
+                            disabled={!selectedLUT}
+                            onClick={handleExportLUT}
+                            className={`w-full py-4 rounded-lg font-semibold technical-text transition-smooth ${selectedLUT
+                                ? 'bg-neon-cyan text-black hover:bg-neon-cyan/90 neon-glow animate-glow'
+                                : 'bg-white/5 text-white/30 cursor-not-allowed'
+                                }`}
+                        >
+                            <Download className="w-5 h-5 inline-block mr-2" />
+                            EXPORT LUT
+                        </button>
+
+                        {/* Batch Export (Locked) */}
+                        <button
+                            disabled
+                            className="w-full mt-3 py-3 rounded-lg font-semibold technical-text bg-white/5 text-neon-gold/50 cursor-not-allowed flex items-center justify-center gap-2 gold-glow"
+                        >
+                            <Lock className="w-4 h-4" />
+                            BATCH EXPORT
+                            <span className="text-xs">(PRO)</span>
+                        </button>
+                    </div>
+                </aside>
+            </div>
+
+            {/* Footer - Dream Road Pictures */}
+            <footer className="glass-panel-strong border-t border-white/10 px-6 py-3 text-center">
+                <p className="text-xs text-white/30">
+                    Powered by <span className="text-white/50 font-semibold">Dream Road Pictures</span>
+                </p>
+            </footer>
+        </div>
+    )
+}
